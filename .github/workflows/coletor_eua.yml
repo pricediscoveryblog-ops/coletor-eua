@@ -1,0 +1,81 @@
+name: coletor-eua
+
+on:
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "incremental (só quem publicou 10-K/10-Q) ou completo (reprocessa tudo)"
+        type: choice
+        options: [incremental, completo]
+        default: incremental
+  schedule:
+    - cron: "0 7 * * 0"       # domingo 04h Brasília: carga completa (companyfacts.zip)
+    - cron: "0 11 * * 2-6"    # ter-sáb 08h Brasília: incremental (filings do dia útil anterior)
+
+permissions:
+  contents: write
+
+concurrency:
+  group: coletor-eua
+  cancel-in-progress: false
+
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      SEC_USER_AGENT: ${{ vars.SEC_USER_AGENT || 'PriceDiscovery pricediscovery.blog@gmail.com' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Recuperar estado anterior (branch dados)
+        run: |
+          if git fetch --depth=1 origin dados 2>/dev/null; then
+            git checkout FETCH_HEAD -- dados  2>/dev/null || true
+            git checkout FETCH_HEAD -- cache  2>/dev/null || true
+            git reset -q
+            ls -la dados cache 2>/dev/null || true
+          else
+            echo "primeira execução: ainda não existe a branch dados"
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Testes sintéticos (aborta se a lógica quebrar)
+        run: python testes/teste_coletor.py
+
+      - name: Definir modo
+        id: modo
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then M="${{ inputs.modo }}";
+          elif [ "${{ github.event.schedule }}" = "0 7 * * 0" ]; then M=completo;
+          else M=incremental; fi
+          echo "modo=$M" >> "$GITHUB_OUTPUT"
+          echo "modo: $M"
+
+      - name: Coletar
+        run: python coletor_eua.py ${{ steps.modo.outputs.modo }}
+
+      - name: Sonda de fontes de preço
+        if: steps.modo.outputs.modo == 'completo'
+        continue-on-error: true
+        run: python sonda_precos.py
+
+      - name: Publicar na branch dados (commit único, sem acumular histórico)
+        run: |
+          rm -rf /tmp/pub && mkdir -p /tmp/pub
+          cp -r dados /tmp/pub/
+          cp -r cache /tmp/pub/ 2>/dev/null || true
+          cd /tmp/pub
+          git init -q -b dados
+          git config user.name "pricediscovery-bot"
+          git config user.email "pricediscovery.blog@gmail.com"
+          git add -A
+          git commit -qm "dados EUA $(date -u +%F) (${{ steps.modo.outputs.modo }})"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" dados
+          du -sh /tmp/pub/dados
