@@ -6,6 +6,7 @@ Casos cobertos:
      10-K/A posterior reapresentando o anual; fluxo de caixa só em YTD; exercício em andamento (só 1T);
      ações de capa (dei); data da 1ª divulgação (point-in-time).
   B) exercício terminando em janeiro (estilo Walmart); 10-Q do 2T ausente; ações só no balanço (multiclasse).
+  C) D&A em tag alternativa com cobertura trimestral vs. tag só anual (estilo Microsoft).
 """
 import sys
 from pathlib import Path
@@ -103,6 +104,20 @@ def empresa_b():
     return fx
 
 
+def empresa_c():
+    """Estilo Microsoft: 'Depreciation' só no anual (nota) e 'DepreciationAmortizationAndOther' no fluxo com YTD."""
+    fx = {"facts": {"us-gaap": {}, "dei": {}}}
+    S, e = "2024-07-01", ["2024-09-30", "2024-12-31", "2025-03-31", "2025-06-30"]
+    q = ["2024-10-30", "2025-01-29", "2025-04-30"]
+    for k in range(3):
+        add(fx, "DepreciationAmortizationAndOther", f(S, e[k], 8 * (k + 1), "10-Q", q[k]))
+        add(fx, "OperatingIncomeLoss", f(S, e[k], 30 * (k + 1), "10-Q", q[k]))
+    add(fx, "DepreciationAmortizationAndOther", f(S, e[3], 34, "10-K", "2025-07-30"))
+    add(fx, "Depreciation", f(S, e[3], 28, "10-K", "2025-07-30"))
+    add(fx, "OperatingIncomeLoss", f(S, e[3], 128, "10-K", "2025-07-30"))
+    return fx
+
+
 def checar(nome, obtido, esperado):
     ok = (pd.isna(obtido) and esperado is None) or (esperado is not None and abs(obtido - esperado) < 1e-9)
     print(f"  {'OK ' if ok else 'ERRO'} {nome}: obtido={obtido} esperado={esperado}")
@@ -156,6 +171,13 @@ def rodar():
     tudo &= checar("3T25 FCO indeterminado (falta 6M)", g("trimestral", "3T25", "fco"), None)
     tudo &= checar("sem LTM (trimestre faltante)", float((d.tipo == "ltm").sum()), 0.0)
     tudo &= checar("ações = balanço (sem capa)", ac.sort_values("data")["acoes"].iloc[-1], 8000)
+
+    print("Empresa C")
+    df, ac, aud = processar_empresa(empresa_c())
+    d = derivar(df.copy())
+    g = lambda tipo, per, col: d.loc[(d.tipo == tipo) & (d.periodo == per), col].iloc[0]
+    tudo &= checar("anual 2025 D&A usa fluxo de caixa (34), não nota (28)", g("anual", "2025", "da"), 34)
+    tudo &= checar("4T25 D&A = 34 - 24", g("trimestral", "4T25", "da"), 10)
     print("\nRESULTADO:", "TODOS OK" if tudo else "HÁ ERROS")
     return tudo
 
