@@ -652,6 +652,8 @@ def no_universo(cad_row) -> tuple[bool, str]:
     if cad_row.get("tipo_especial") == "SPAC":
         return False, "SPAC (SIC 6770)"
     et = str(cad_row.get("entity_type") or "")
+    if et == "other":
+        return False, "emissor estrangeiro (20-F/40-F) ou não operacional (entityType=other)"
     if et and et != "operating":
         return False, f"entityType={et}"
     return True, ""
