@@ -179,6 +179,11 @@ def calcular(base: pd.DataFrame, cad: pd.DataFrame, acoes: pd.DataFrame, precos_
     cad = _norm(cad)
     acoes = _norm(acoes, datas=("data",))
     precos_alvo = _norm(precos_alvo, datas=("alvo", "data_preco"))
+    precos_alvo["preco_bruto"] = pd.to_numeric(precos_alvo["preco_bruto"], errors="coerce").astype(float)
+    acoes["acoes"] = pd.to_numeric(acoes["acoes"], errors="coerce").astype(float)
+    for c in COLS_BASE[8:]:                                   # colunas numéricas dos fundamentos
+        if c in b.columns:
+            b[c] = pd.to_numeric(b[c], errors="coerce").astype(float)
     ultimo_pregao = pd.Timestamp(ultimo_pregao).as_unit("ns") if hasattr(pd.Timestamp(ultimo_pregao), "as_unit") \
         else pd.Timestamp(ultimo_pregao)
     tick = cad.set_index("cik")["ticker"].to_dict()
@@ -238,7 +243,7 @@ def calcular(base: pd.DataFrame, cad: pd.DataFrame, acoes: pd.DataFrame, precos_
     p = idx_em(p.assign(_da=p["data_acoes"].fillna(p["_ref"])), "_da", isp, "_idx_acoes")
     p["acoes_ajust"] = p["acoes"] * p["_idx_preco"] / p["_idx_acoes"]
 
-    pos = lambda s: s.where(s > 0)
+    pos = lambda s: pd.to_numeric(s, errors="coerce").astype(float).where(lambda x: x > 0)
     p["valor_mercado"] = p["preco_bruto"] * p["acoes_ajust"]          # US$ x milhões de ações = US$ milhões
     nc = p["nao_controladores"].fillna(0)
     p["ev_com_arrend"] = p["valor_mercado"] + p["div_liq_com_arrend"] + nc
@@ -280,8 +285,9 @@ def calcular(base: pd.DataFrame, cad: pd.DataFrame, acoes: pd.DataFrame, precos_
     # alerta de salto: valor de mercado 5x maior/menor que o ponto anterior sem variação equivalente de preço
     out = out.sort_values(["cik", "tipo", "data"])
     g = out.groupby(["cik", "tipo"])
-    rv = out["valor_mercado"] / g["valor_mercado"].shift(1)
-    rp = out["preco_on"] / g["preco_on"].shift(1)
+    nz = lambda x: pd.to_numeric(x, errors="coerce").astype(float).where(lambda v: v != 0)
+    rv = nz(out["valor_mercado"]) / nz(g["valor_mercado"].shift(1))
+    rp = nz(out["preco_on"]) / nz(g["preco_on"].shift(1))
     salto = ((rv > 5) | (rv < 0.2)) & (rp.between(0.5, 2))
     out.loc[salto, "notas"] = (out.loc[salto, "notas"] + "; possível erro de ações (salto)").str.strip("; ")
     return out.reset_index(drop=True)
@@ -302,9 +308,21 @@ def carregar_base() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     return base, cad, acoes
 
 
+TIPOS_CACHE = {"ticker": object, "alvo": "datetime64[ns]", "data_preco": "datetime64[ns]", "preco_bruto": float,
+               "data": "datetime64[ns]", "bruto": float, "razao": float}
+
+
 def _ler(nome, colunas):
+    """Cache do parquet; ausente -> DataFrame vazio JÁ TIPADO (concat com vazio sem tipo degradava colunas p/ object)."""
     arq = DADOS / nome
-    return pd.read_parquet(arq) if arq.exists() else pd.DataFrame(columns=colunas)
+    if arq.exists():
+        df = pd.read_parquet(arq)
+    else:
+        df = pd.DataFrame({c: pd.Series(dtype=TIPOS_CACHE.get(c, object)) for c in colunas})
+    for c in colunas:
+        if c in df.columns and TIPOS_CACHE.get(c) is float:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
 
 
 def main(baixador=None, hoje: pd.Timestamp | None = None):
