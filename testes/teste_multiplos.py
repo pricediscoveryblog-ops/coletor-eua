@@ -119,6 +119,21 @@ def rodar():
     tudo &= checar("splits após concat com cache vazio (tipo object)", float(isp["idx"].iloc[0]), 2.0)
     mult2 = m.calcular(base, cad, acoes, pa, juntos, ult)
     tudo &= checar("cálculo completo com splits 'object'", q(1, "trimestral", "2020-06-30", "valor_mercado"), 100000.0)
+    # caso real da 1ª carga: preços com tipo genérico ('object') e um preço zero (ticker sem negócio)
+    pa_obj = pa.copy()
+    pa_obj["preco_bruto"] = pa_obj["preco_bruto"].astype(object)
+    pa_obj.loc[pa_obj.index[0], "preco_bruto"] = 0.0
+    try:
+        mult3 = m.calcular(base, cad, acoes.astype({"acoes": object}), pa_obj, juntos, ult)
+        ok3 = True
+    except Exception as e:
+        print("   ", type(e).__name__, e)
+        ok3 = False
+    tudo &= checar("preço 'object' com zero não derruba o cálculo", float(ok3), 1.0)
+    tudo &= checar("valor de mercado numérico (float)", float(mult3["valor_mercado"].dtype.kind == "f") if ok3 else 0.0, 1.0)
+    # caches vazios nascem tipados
+    vazio_cache = m._ler("nao_existe.parquet", ["ticker", "alvo", "data_preco", "preco_bruto"])
+    tudo &= checar("cache vazio com preço numérico", float(vazio_cache["preco_bruto"].dtype.kind == "f"), 1.0)
     print("\nRESULTADO:", "TODOS OK" if tudo else "HÁ ERROS")
     return tudo
 
