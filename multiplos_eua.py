@@ -28,8 +28,12 @@ import sys
 import time
 from pathlib import Path
 
+import warnings
+
 import numpy as np
 import pandas as pd
+
+warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
 
 DADOS = Path(__file__).resolve().parent / "dados"
 INICIO = pd.Timestamp("2013-12-01")
@@ -56,8 +60,8 @@ def _para_longo(df: pd.DataFrame, lote: list[str]) -> tuple[pd.DataFrame, pd.Dat
         df.columns = pd.MultiIndex.from_product([df.columns, [lote[0]]])
     if "Close" not in set(df.columns.get_level_values(0)):              # layout (ticker, campo)
         df = df.swaplevel(axis=1)
-    close = df["Close"]
-    spl = df["Stock Splits"] if "Stock Splits" in set(df.columns.get_level_values(0)) else close * 0
+    close = df["Close"].copy()
+    spl = df["Stock Splits"].copy() if "Stock Splits" in set(df.columns.get_level_values(0)) else close * 0
     c = close.reset_index().melt(id_vars=close.index.name or "Date", var_name="ticker", value_name="close")
     s = spl.reset_index().melt(id_vars=spl.index.name or "Date", var_name="ticker", value_name="split")
     c.columns = ["data", "ticker", "close"]
@@ -149,6 +153,10 @@ def indice_splits(splits: pd.DataFrame) -> pd.DataFrame:
     if splits.empty:
         return pd.DataFrame(columns=["ticker", "data", "idx"])
     s = _norm(splits, datas=("data",)).drop_duplicates(["ticker", "data"]).sort_values(["ticker", "data"])
+    s["razao"] = pd.to_numeric(s["razao"], errors="coerce").astype(float)   # concat com cache vazio vira 'object'
+    s = s[s["razao"] > 0]
+    if s.empty:
+        return pd.DataFrame(columns=["ticker", "data", "idx"])
     s["idx"] = s.groupby("ticker")["razao"].cumprod()
     return s[["ticker", "data", "idx"]]
 
@@ -360,12 +368,16 @@ def main(baixador=None, hoje: pd.Timestamp | None = None):
     precos_alvo = pd.concat([cache, resolver_alvos(hoje_alvo, recentes)], ignore_index=True) \
         .drop_duplicates(["ticker", "alvo"], keep="last")
 
-    mult = calcular(base, cad, acoes, precos_alvo, splits, ultimo_pregao)
-
+    # caches gravados antes do cálculo: se o cálculo falhar, o download não se perde
     DADOS.mkdir(exist_ok=True)
+    splits["razao"] = pd.to_numeric(splits["razao"], errors="coerce")
     cache.to_parquet(DADOS / "precos_alvo.parquet", index=False, compression="zstd")
     recentes.to_parquet(DADOS / "precos_recentes.parquet", index=False, compression="zstd")
     splits.to_parquet(DADOS / "splits_eua.parquet", index=False, compression="zstd")
+    print(f"caches gravados: {len(cache)} preços em datas-alvo, {len(recentes)} recentes, {len(splits)} desdobramentos",
+          flush=True)
+
+    mult = calcular(base, cad, acoes, precos_alvo, splits, ultimo_pregao)
     mult.to_parquet(DADOS / "multiplos_eua.parquet", index=False, compression="zstd")
     ult = mult[(mult["tipo"] == "trimestral") & (mult["data"] == ultimo_pregao)]
     resumo = {"gerado_em": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
