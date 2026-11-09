@@ -47,7 +47,9 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Testes sintéticos (aborta se a lógica quebrar)
-        run: python testes/teste_coletor.py
+        run: |
+          python testes/teste_coletor.py
+          python testes/teste_multiplos.py
 
       - name: Definir modo
         id: modo
@@ -61,10 +63,9 @@ jobs:
       - name: Coletar
         run: python coletor_eua.py ${{ steps.modo.outputs.modo }}
 
-      - name: Sonda de fontes de preço
-        if: steps.modo.outputs.modo == 'completo'
-        continue-on-error: true
-        run: python sonda_precos.py
+      - name: Múltiplos de mercado (preços Yahoo via yfinance)
+        continue-on-error: true          # se o Yahoo falhar, os fundamentos são publicados mesmo assim
+        run: python multiplos_eua.py
 
       - name: Publicar na branch dados (commit único, sem acumular histórico)
         run: |
