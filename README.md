@@ -24,7 +24,7 @@ Os arquivos são `eua_anual.parquet`, `eua_trimestral.parquet` e `eua_ltm.parque
 Os demais arquivos são:
 - `acoes_eua.parquet`: ações em circulação, com fonte e `alerta_salto`.
 - `cadastro_eua.parquet` e `auditoria_eua.csv.gz`.
-- `metadados.json` e `sonda_precos.json`.
+- `metadados.json`, `multiplos_eua.parquet` e `multiplos_meta.json`.
 
 Unidades: US$ milhões; ações em milhões.
 
@@ -61,12 +61,35 @@ Unidades: US$ milhões; ações em milhões.
 - **Bancos e seguradoras.** Receita/EBITDA não se aplicam; ficam marcados como `financeira` e precisam de módulo próprio.
 - **Juros pagos e IR pagos.** Muitas empresas só divulgam no 10-K, então os índices de cobertura trimestrais/LTM ficam vazios nesses casos.
 - **Emissores estrangeiros.** Quem arquiva 20-F/40-F (IFRS) está fora.
-- **Preços.** A SEC não fornece preços. `sonda_precos.py` testa fontes gratuitas a partir do Actions antes de construirmos os múltiplos.
+- **Preços.** A SEC não fornece preços: vêm do Yahoo (não oficial; pode mudar ou limitar acesso).
+
+## Múltiplos de mercado (`multiplos_eua.py`)
+
+Os preços vêm do Yahoo Finance via `yfinance` (gratuito, sem chave). Na sonda, os IPs do GitHub Actions não foram bloqueados. A saída `dados/multiplos_eua.parquet` tem o mesmo formato do `multiplos.csv.gz` da base brasileira:
+
+- **Anual.** Um ponto no fim de cada exercício, com os números do próprio exercício.
+- **Trimestral.** Um ponto no fim de cada trimestre fiscal, em regime de ponto no tempo. Vale o último documento já divulgado até a data, pela `dt_arquivamento`, com lucro/EBITDA/receita dos 12 meses desse documento.
+- **Último pregão.** Um ponto no último pregão, sobrescrito a cada execução. O histórico guarda só os fechamentos trimestrais.
+
+**Preço × ações na mesma base.**
+- O Yahoo ajusta os preços por desdobramentos. O módulo volta ao preço negociado na data (Close × desdobramentos posteriores).
+- As ações vêm da série do coletor e são corrigidas pelos desdobramentos entre a data do dado e a do preço.
+- Empresas com mais de um ticker listado usam as ações totais do balanço × o preço do ticker principal. É uma aproximação, registrada nas notas.
+
+**Definições.**
+- EV = valor de mercado + dívida líquida + não controladores.
+- EV/EBITDA "IFRS 16" = EV com arrendamentos ÷ EBITDA equivalente IFRS 16. Se o LTM não tiver o custo de arrendamento operacional, usa o do último 10-K.
+- EV/EBITDA "pré-IFRS 16" = EV sem arrendamentos ÷ EBITDA após arrendamentos financeiros.
+- P/L e P/VPA usam lucro e PL dos controladores.
+- Dividend yield = dividendos pagos em 12 meses ÷ valor de mercado.
+
+**Caches.** Ficam em `precos_alvo`, `precos_recentes` e `splits_eua`. A primeira execução baixa o histórico desde dez/2013; as seguintes, só os últimos 25 dias. O passo roda depois da coleta, de terça a sábado e no domingo. Se falhar, os fundamentos são publicados mesmo assim.
 
 ## Testes
 
 ```
 python testes/teste_coletor.py
+python testes/teste_multiplos.py
 ```
 
 São casos sintéticos: troca de tag, 10-K/A, YTD, 10-Q faltante, exercício em andamento e multiclasse. O workflow aborta se algum falhar.
