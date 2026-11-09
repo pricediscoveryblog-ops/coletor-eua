@@ -112,6 +112,13 @@ def rodar():
     nota = q(2, "trimestral", "2020-12-31", "notas")
     tudo &= checar("BBB nota 'sem LTM' e 'mais de um ticker'", float("sem LTM" in nota and "mais de um ticker" in nota), 1.0)
     tudo &= checar("BBB EV/EBITDA equiv = EBITDA (sem arrend. operacional)", q(2, "trimestral", "2020-12-31", "ev_ebitda_ifrs16"), 10510.0 / 300)
+    # cache de splits vazio (como na 1ª execução) concatenado com splits novos: razão chega como 'object'
+    vazio = pd.DataFrame(columns=["ticker", "data", "razao"])
+    juntos = pd.concat([vazio, sp2], ignore_index=True)
+    isp = m.indice_splits(juntos)
+    tudo &= checar("splits após concat com cache vazio (tipo object)", float(isp["idx"].iloc[0]), 2.0)
+    mult2 = m.calcular(base, cad, acoes, pa, juntos, ult)
+    tudo &= checar("cálculo completo com splits 'object'", q(1, "trimestral", "2020-06-30", "valor_mercado"), 100000.0)
     print("\nRESULTADO:", "TODOS OK" if tudo else "HÁ ERROS")
     return tudo
 
