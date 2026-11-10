@@ -18,7 +18,9 @@ DURACAO = {
     "lucro_bruto": [["GrossProfit"]],
     "ebit": [["OperatingIncomeLoss"]],
     "lucro_liquido": [["ProfitLoss"], ["NetIncomeLoss"]],
-    "lucro_controladores": [["NetIncomeLoss"], ["NetIncomeLossAvailableToCommonStockholdersBasic"]],
+    # ProfitLoss (consolidado) por último: algumas empresas só usaram essa tag em anos antigos (ex.: Agilent até 2019);
+    # sem NetIncomeLoss no exercício, os não controladores costumam ser irrelevantes (a tag usada fica na auditoria)
+    "lucro_controladores": [["NetIncomeLoss"], ["NetIncomeLossAvailableToCommonStockholdersBasic"], ["ProfitLoss"]],
     "da": [["DepreciationDepletionAndAmortization"], ["DepreciationAmortizationAndAccretionNet"],
            ["DepreciationAndAmortization"], ["DepreciationAmortizationAndOther"],
            ["Depreciation", "AmortizationOfIntangibleAssets"],
