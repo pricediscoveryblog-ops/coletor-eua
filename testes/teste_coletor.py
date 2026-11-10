@@ -118,6 +118,16 @@ def empresa_c():
     return fx
 
 
+def empresa_d():
+    """Estilo Agilent: lucro anual só em ProfitLoss até 2019 e em NetIncomeLoss a partir de 2020."""
+    fx = {"facts": {"us-gaap": {}, "dei": {}}}
+    for ano, tag, v in ((2019, "ProfitLoss", 1000), (2020, "NetIncomeLoss", 700)):
+        S, E = f"{ano - 1}-11-01", f"{ano}-10-31"
+        add(fx, tag, f(S, E, v, "10-K", f"{ano}-12-20"))
+        add(fx, "Revenues", f(S, E, 5000, "10-K", f"{ano}-12-20"))
+    return fx
+
+
 def checar(nome, obtido, esperado):
     ok = (pd.isna(obtido) and esperado is None) or (esperado is not None and abs(obtido - esperado) < 1e-9)
     print(f"  {'OK ' if ok else 'ERRO'} {nome}: obtido={obtido} esperado={esperado}")
@@ -178,6 +188,13 @@ def rodar():
     g = lambda tipo, per, col: d.loc[(d.tipo == tipo) & (d.periodo == per), col].iloc[0]
     tudo &= checar("anual 2025 D&A usa fluxo de caixa (34), não nota (28)", g("anual", "2025", "da"), 34)
     tudo &= checar("4T25 D&A = 34 - 24", g("trimestral", "4T25", "da"), 10)
+
+    print("Empresa D")
+    df, ac, aud = processar_empresa(empresa_d())
+    d = derivar(df.copy())
+    g = lambda tipo, per, col: d.loc[(d.tipo == tipo) & (d.periodo == per), col].iloc[0]
+    tudo &= checar("2019 lucro controladores via ProfitLoss (sem NetIncomeLoss)", g("anual", "2019", "lucro_controladores"), 1000)
+    tudo &= checar("2020 lucro controladores via NetIncomeLoss", g("anual", "2020", "lucro_controladores"), 700)
     print("\nRESULTADO:", "TODOS OK" if tudo else "HÁ ERROS")
     return tudo
 
