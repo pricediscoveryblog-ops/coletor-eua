@@ -686,6 +686,17 @@ def no_universo(cad_row) -> tuple[bool, str]:
     return True, ""
 
 
+def _texto(v, largura: int = 0) -> str:
+    """Texto limpo para o parquet do cadastro: o cache em CSV volta como número (1231 -> 1231.0) e as empresas
+    novas entram como texto; tipo misto na mesma coluna quebra o to_parquet (falhas de 10 a 15/11/2026)."""
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    t = str(v).strip()
+    return t.zfill(largura) if largura and t.isdigit() else t
+
+
 # =============================================================================== execução
 def salvar(base: pd.DataFrame, acoes: pd.DataFrame, cad: pd.DataFrame, aud: pd.DataFrame, modo: str, extra: dict):
     DADOS.mkdir(exist_ok=True)
@@ -700,7 +711,11 @@ def salvar(base: pd.DataFrame, acoes: pd.DataFrame, cad: pd.DataFrame, aud: pd.D
     acoes.to_parquet(DADOS / "acoes_eua.parquet", index=False, compression="zstd")
     cols_cad = ["cik", "empresa", "ticker", "tickers", "bolsa", "sic", "sic_desc", "owner_org", "setor", "subsetor",
                 "segmento", "tipo_especial", "fye", "categoria_sec", "entity_type"]
-    cad[[c for c in cols_cad if c in cad.columns]].to_parquet(DADOS / "cadastro_eua.parquet", index=False)
+    cad_out = cad[[c for c in cols_cad if c in cad.columns]].copy()
+    for c in cad_out.columns:  # cache CSV relido como número + empresas novas em texto: tipo misto quebra o parquet
+        if cad_out[c].dtype == object and not cad_out[c].map(lambda v: isinstance(v, str)).all():
+            cad_out[c] = cad_out[c].map(lambda v, c=c: _texto(v, 4 if c in ("sic", "fye") else 0))
+    cad_out.to_parquet(DADOS / "cadastro_eua.parquet", index=False)
     aud.to_csv(DADOS / "auditoria_eua.csv.gz", index=False)
     meta = {"gerado_em": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"), "modo": modo,
             "empresas_universo": int(len(cad)), "empresas_com_dados": int(base["cik"].nunique()),
