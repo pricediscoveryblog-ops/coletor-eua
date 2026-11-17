@@ -553,6 +553,32 @@ def derivar(df: pd.DataFrame) -> pd.DataFrame:
     df["div_liq_ebitda_pre_ifrs16"] = div(df["div_liq_sem_arrend"], df["ebitda_pre_ifrs16"]).where(doze)
     df["roe_pl_final"] = div(df["lucro_controladores"], df["pl_controladores"]).where(doze)
 
+    # ROIC (variante Price Discovery ajustada ao US GAAP / ASC 842), calculado aqui para o app não gastar memória.
+    # NOPAT = EBIT × (1 − 25%) se EBIT > 0 (21% federal + média estadual; sem crédito fiscal sobre prejuízo).
+    # Arrendamento operacional já está no EBIT (opex); só o financeiro segue a lógica do IFRS 16.
+    # ROIC caixa = (NOPAT + D&A − capex org. − pagamentos de arrend. financeiro) ÷ (DL s/ arrend. + PL); sem
+    #   pagamento de arrend. financeiro na DFC e com passivo financeiro, 2,5 × esse passivo entra no capital.
+    # ROIC tradicional = NOPAT aj. ÷ (DL s/ arrend. + passivos de arrend. financeiro e operacional + PL), com
+    #   NOPAT aj. sobre EBIT + juros implícitos do arrend. operacional (passivo operacional × juros pagos ÷ dívida
+    #   bruta, entre 3% e 12%; sem dado, 6%; nunca acima do custo de arrend. operacional divulgado).
+    # Capital no fim do período; só anual e LTM; vazio com capital ≤ 0.
+    aliq_ir = 0.25
+    p_fin, p_op = z(df["passivo_arrend_financeiro"]), z(df["passivo_arrend_operacional"])
+    nopat = df["ebit"].where(df["ebit"] <= 0, df["ebit"] * (1 - aliq_ir))
+    capitaliza = df["pag_arrend_principal"].isna() & df["pag_arrend_juros"].isna() & (p_fin > 0)
+    ci_caixa = df["div_liq_sem_arrend"] + df["patrimonio_liquido"] + (2.5 * p_fin).where(capitaliza, 0)
+    num_caixa = nopat + df["da"] - df["capex_organico"] - df["pagamento_arrendamento"]
+    divida = df["divida_bruta_ex_arrend"]
+    taxa_op = (df["juros_pagos"].abs() / divida.where(divida > 0)).clip(0.03, 0.12).fillna(0.06)
+    juros_op = p_op * taxa_op
+    custo_op = df["custo_arrend_operacional"]
+    juros_op = juros_op.where(custo_op.isna(), np.minimum(juros_op, custo_op.clip(lower=0)))
+    ebit_aj = df["ebit"] + juros_op
+    nopat_aj = ebit_aj.where(ebit_aj <= 0, ebit_aj * (1 - aliq_ir))
+    ci_trad = df["div_liq_sem_arrend"] + p_fin + p_op + df["patrimonio_liquido"]
+    df["roic_caixa"] = div(num_caixa, ci_caixa.where(ci_caixa > 0)).where(doze)
+    df["roic_trad"] = div(nopat_aj, ci_trad.where(ci_trad > 0)).where(doze)
+
     notas[df["receita"].isna()] += "receita ausente; "
     notas[df["da"].isna() & df["ebit"].notna()] += "D&A ausente (sem EBITDA); "
     notas[df["emprestimos_financiamentos"].isna()] += "dívida não identificada; "
@@ -576,7 +602,8 @@ COLUNAS = [
     "passivo_arrend_financeiro", "divida_bruta_ex_arrend", "pl_controladores", "nao_controladores", "clientes",
     "estoques", "fornecedores", "div_liq_com_arrend", "div_liq_sem_arrend", "ncav",
     "margem_bruta", "margem_ebitda", "margem_ebitda_pre_ifrs16", "margem_liquida", "capex_org_receita",
-    "capex_org_da", "div_liq_ebitda_ifrs16", "div_liq_ebitda_pre_ifrs16", "roe_pl_final", "desp_fin_liquida",
+    "capex_org_da", "div_liq_ebitda_ifrs16", "div_liq_ebitda_pre_ifrs16", "roe_pl_final", "roic_caixa", "roic_trad",
+    "desp_fin_liquida",
     "ebitda_menos_ir", "ebitda_ir_capex", "servico_divida_c_arrend", "cob_ebit_res_fin",
     "cob_juros_caixa", "dscr_ebitda", "dscr_pos_capex", "dscr_ebitda_arrend_den",
     "acoes_media_basica", "acoes_media_diluida", "notas",
