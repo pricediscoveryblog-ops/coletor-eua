@@ -1,0 +1,20 @@
+{
+  "gerado_em": "2026-11-20 18:56 UTC",
+  "modo": "incremental",
+  "empresas_universo": 6053,
+  "empresas_com_dados": 4052,
+  "linhas": {
+    "anual": 50974,
+    "trimestral": 199172,
+    "ltm": 186199
+  },
+  "tamanho_mb": {
+    "anual": 18.8,
+    "trimestral": 53.6,
+    "ltm": 61.1
+  },
+  "unidade": "US$ milhões; ações em milhões",
+  "fonte": "SEC EDGAR XBRL companyfacts + submissions + company_tickers_exchange",
+  "empresas_atualizadas": 349,
+  "ultimo_completo": "2026-11-17 11:36 UTC"
+}
