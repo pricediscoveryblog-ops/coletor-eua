@@ -52,7 +52,7 @@ COLS_BASE = ["cik", "cnpj", "ticker", "empresa", "tipo", "periodo", "dt_fim", "d
 # =============================================================================== preços (yfinance)
 def _para_longo(df: pd.DataFrame, lote: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Saída do yf.download -> (preços: ticker, data, close, split) e (splits: ticker, data, razao)."""
-    vazio = (pd.DataFrame(columns=["ticker", "data", "close", "split"]), pd.DataFrame(columns=["ticker", "data", "razao"]))
+    vazio = (pd.DataFrame(columns=["ticker", "data", "close", "split", "vol_fin"]), pd.DataFrame(columns=["ticker", "data", "razao"]))
     if df is None or df.empty:
         return vazio
     if not isinstance(df.columns, pd.MultiIndex):                      # versões antigas, um ticker só
@@ -62,13 +62,19 @@ def _para_longo(df: pd.DataFrame, lote: list[str]) -> tuple[pd.DataFrame, pd.Dat
         df = df.swaplevel(axis=1)
     close = df["Close"].copy()
     spl = df["Stock Splits"].copy() if "Stock Splits" in set(df.columns.get_level_values(0)) else close * 0
+    vol = df["Volume"].copy() if "Volume" in set(df.columns.get_level_values(0)) else close * np.nan
     c = close.reset_index().melt(id_vars=close.index.name or "Date", var_name="ticker", value_name="close")
     s = spl.reset_index().melt(id_vars=spl.index.name or "Date", var_name="ticker", value_name="split")
     c.columns = ["data", "ticker", "close"]
     s.columns = ["data", "ticker", "split"]
-    longo = c.merge(s, on=["data", "ticker"], how="left").dropna(subset=["close"])
+    vv = vol.reset_index().melt(id_vars=vol.index.name or "Date", var_name="ticker", value_name="volume")
+    vv.columns = ["data", "ticker", "volume"]
+    longo = c.merge(s, on=["data", "ticker"], how="left").merge(vv, on=["data", "ticker"], how="left") \
+        .dropna(subset=["close"])
     longo["data"] = pd.to_datetime(longo["data"]).dt.tz_localize(None).dt.normalize()
     longo["split"] = longo["split"].fillna(0.0)
+    # volume financeiro do dia (US$): Close e Volume do Yahoo vêm ambos ajustados por desdobramentos, o produto não
+    longo["vol_fin"] = pd.to_numeric(longo["volume"], errors="coerce").astype(float) * longo["close"].astype(float)
     splits = longo[(longo["split"] > 0) & (longo["split"] != 1)][["ticker", "data", "split"]].rename(
         columns={"split": "razao"})
     return longo, splits
@@ -121,6 +127,28 @@ def baixar(tickers: list[str], inicio: pd.Timestamp, fim: pd.Timestamp | None = 
 
 
 # =============================================================================== preço em cada data-alvo
+INDICES = {"^GSPC": "S&P 500", "^IXIC": "Nasdaq Composite"}
+
+
+def indices(hoje: pd.Timestamp, baixador=None) -> pd.DataFrame:
+    """Fechamento diário dos índices de referência (régua das altas e baixas do app) em dados/indices_eua.parquet:
+    histórico desde 2015 na primeira vez, depois só os últimos dias, acumulando."""
+    arq = DADOS / "indices_eua.parquet"
+    ant = pd.read_parquet(arq) if arq.exists() else pd.DataFrame(columns=["data", "ticker", "indice", "fech"])
+    ini = pd.Timestamp("2015-01-01") if ant.empty else hoje - pd.Timedelta(days=DIAS_DIARIO)
+    pr, _, _ = baixar(list(INDICES), ini, hoje, baixador)
+    if pr.empty:
+        return ant
+    novo = pr.assign(indice=pr["ticker"].map(INDICES), fech=pr["close"].astype(float))[["data", "ticker", "indice", "fech"]]
+    out = pd.concat([ant, novo], ignore_index=True) if len(ant) else novo
+    out["data"] = pd.to_datetime(out["data"])
+    out = out.drop_duplicates(["ticker", "data"], keep="last").sort_values(["ticker", "data"])
+    DADOS.mkdir(exist_ok=True)
+    out.to_parquet(arq, index=False, compression="zstd")
+    print(f"índices: {len(out)} fechamentos ({', '.join(INDICES.values())})")
+    return out
+
+
 def _norm(df: pd.DataFrame, datas=(), textos=("ticker",), inteiros=("cik",)) -> pd.DataFrame:
     """Mesmos tipos de chave em todos os merges (caches lidos do parquet vêm com tipos diferentes dos recém-criados)."""
     df = df.copy()
@@ -309,7 +337,7 @@ def carregar_base() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 
 TIPOS_CACHE = {"ticker": object, "alvo": "datetime64[ns]", "data_preco": "datetime64[ns]", "preco_bruto": float,
-               "data": "datetime64[ns]", "bruto": float, "razao": float}
+               "data": "datetime64[ns]", "bruto": float, "razao": float, "vol_fin": float}
 
 
 def _ler(nome, colunas):
@@ -333,7 +361,7 @@ def main(baixador=None, hoje: pd.Timestamp | None = None):
     print(f"múltiplos: {len(tickers)} tickers")
 
     cache = _ler("precos_alvo.parquet", ["ticker", "alvo", "data_preco", "preco_bruto"])
-    recentes = _ler("precos_recentes.parquet", ["ticker", "data", "bruto"])
+    recentes = _ler("precos_recentes.parquet", ["ticker", "data", "bruto", "vol_fin"])
     splits = _ler("splits_eua.parquet", ["ticker", "data", "razao"])
     for df_, c in ((cache, "alvo"), (cache, "data_preco"), (recentes, "data"), (splits, "data")):
         df_[c] = pd.to_datetime(df_[c])
@@ -357,7 +385,7 @@ def main(baixador=None, hoje: pd.Timestamp | None = None):
         if not pr.empty:
             cache = pd.concat([cache, resolver_alvos(alv[alv["ticker"].isin(novos)], pr)], ignore_index=True)
             recentes = pd.concat([recentes, pr[pr["data"] >= hoje - pd.Timedelta(days=JANELA_RECENTE)]
-                                  [["ticker", "data", "bruto"]]], ignore_index=True)
+                                  [["ticker", "data", "bruto", "vol_fin"]]], ignore_index=True)
         splits = pd.concat([splits, sp], ignore_index=True)
     # 2) últimos dias para os demais
     velhos = [t for t in tickers if t not in novos]
@@ -366,7 +394,7 @@ def main(baixador=None, hoje: pd.Timestamp | None = None):
         pr, sp, f2 = baixar(velhos, hoje - pd.Timedelta(days=DIAS_DIARIO), hoje, baixador)
         falhas += f2
         if not pr.empty:
-            recentes = pd.concat([recentes, pr[["ticker", "data", "bruto"]]], ignore_index=True)
+            recentes = pd.concat([recentes, pr[["ticker", "data", "bruto", "vol_fin"]]], ignore_index=True)
         splits = pd.concat([splits, sp], ignore_index=True)
     recentes = recentes.drop_duplicates(["ticker", "data"], keep="last")
     recentes = recentes[recentes["data"] >= hoje - pd.Timedelta(days=JANELA_RECENTE)]
@@ -394,6 +422,11 @@ def main(baixador=None, hoje: pd.Timestamp | None = None):
     splits.to_parquet(DADOS / "splits_eua.parquet", index=False, compression="zstd")
     print(f"caches gravados: {len(cache)} preços em datas-alvo, {len(recentes)} recentes, {len(splits)} desdobramentos",
           flush=True)
+
+    try:
+        indices(hoje, baixador)
+    except Exception as e:  # noqa: BLE001 — índice de referência não pode derrubar os múltiplos
+        print(f"  ! índices não atualizados: {type(e).__name__}: {str(e)[:120]}")
 
     mult = calcular(base, cad, acoes, precos_alvo, splits, ultimo_pregao)
     mult.to_parquet(DADOS / "multiplos_eua.parquet", index=False, compression="zstd")
