@@ -561,6 +561,7 @@ def derivar(df: pd.DataFrame) -> pd.DataFrame:
     # ROIC tradicional = NOPAT aj. ÷ (DL s/ arrend. + passivos de arrend. financeiro e operacional + PL), com
     #   NOPAT aj. sobre EBIT + juros implícitos do arrend. operacional (passivo operacional × juros pagos ÷ dívida
     #   bruta, entre 3% e 12%; sem dado, 6%; nunca acima do custo de arrend. operacional divulgado).
+    # ROIC caixa ex-goodwill = mesmo numerador ÷ (CI do ROIC caixa − goodwill).
     # Capital no fim do período; só anual e LTM; vazio com capital ≤ 0.
     aliq_ir = 0.25
     p_fin, p_op = z(df["passivo_arrend_financeiro"]), z(df["passivo_arrend_operacional"])
@@ -578,6 +579,10 @@ def derivar(df: pd.DataFrame) -> pd.DataFrame:
     ci_trad = df["div_liq_sem_arrend"] + p_fin + p_op + df["patrimonio_liquido"]
     df["roic_caixa"] = div(num_caixa, ci_caixa.where(ci_caixa > 0)).where(doze)
     df["roic_trad"] = div(nopat_aj, ci_trad.where(ci_trad > 0)).where(doze)
+    # ROIC caixa ex-goodwill: mesmo numerador do ROIC caixa; do capital sai o goodwill do balanço (tag Goodwill,
+    # ASC 350). Sem a tag = sem goodwill (0). Intangíveis identificados na aquisição continuam no capital.
+    ci_caixa_ex_gw = ci_caixa - z(df["goodwill"])
+    df["roic_caixa_ex_goodwill"] = div(num_caixa, ci_caixa_ex_gw.where(ci_caixa_ex_gw > 0)).where(doze)
 
     notas[df["receita"].isna()] += "receita ausente; "
     notas[df["da"].isna() & df["ebit"].notna()] += "D&A ausente (sem EBITDA); "
@@ -600,10 +605,10 @@ COLUNAS = [
     "ativo_total", "ativo_circulante", "caixa", "passivo_total", "passivo_circulante", "passivo_nao_circulante",
     "patrimonio_liquido", "emprestimos_financiamentos", "passivo_arrendamento", "passivo_arrend_operacional",
     "passivo_arrend_financeiro", "divida_bruta_ex_arrend", "pl_controladores", "nao_controladores", "clientes",
-    "estoques", "fornecedores", "div_liq_com_arrend", "div_liq_sem_arrend", "ncav",
+    "estoques", "fornecedores", "goodwill", "div_liq_com_arrend", "div_liq_sem_arrend", "ncav",
     "margem_bruta", "margem_ebitda", "margem_ebitda_pre_ifrs16", "margem_liquida", "capex_org_receita",
     "capex_org_da", "div_liq_ebitda_ifrs16", "div_liq_ebitda_pre_ifrs16", "roe_pl_final", "roic_caixa", "roic_trad",
-    "desp_fin_liquida",
+    "roic_caixa_ex_goodwill", "desp_fin_liquida",
     "ebitda_menos_ir", "ebitda_ir_capex", "servico_divida_c_arrend", "cob_ebit_res_fin",
     "cob_juros_caixa", "dscr_ebitda", "dscr_pos_capex", "dscr_ebitda_arrend_den",
     "acoes_media_basica", "acoes_media_diluida", "notas",

@@ -92,6 +92,8 @@ INSTANTE = {
     "clientes": [["AccountsReceivableNetCurrent"], ["ReceivablesNetCurrent"],
                  ["AccountsNotesAndLoansReceivableNetCurrent"]],
     "estoques": [["InventoryNet"]],
+    # goodwill (ASC 350): saldo do balanço; empresa sem a tag = sem goodwill (o ROIC ex-goodwill usa 0)
+    "goodwill": [["Goodwill"]],
     "fornecedores": [["AccountsPayableCurrent"], ["AccountsPayableAndAccruedLiabilitiesCurrent"]],
 }
 
