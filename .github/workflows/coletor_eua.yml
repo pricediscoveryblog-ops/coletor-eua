@@ -67,6 +67,11 @@ jobs:
         continue-on-error: true          # se o Yahoo falhar, os fundamentos são publicados mesmo assim
         run: python -u multiplos_eua.py
 
+      - name: Calendário de resultados (Nasdaq) e entregas de 10-Q/10-K à SEC
+        continue-on-error: true          # se a Nasdaq falhar, mantém o calendário anterior
+        timeout-minutes: 20
+        run: python -u calendario_eua.py
+
       - name: Publicar na branch dados (commit único, sem acumular histórico)
         run: |
           rm -rf /tmp/pub && mkdir -p /tmp/pub
