@@ -1,0 +1,31 @@
+{
+  "executado_em": "2026-11-08T17:38:57+00:00",
+  "fontes": {
+    "yfinance": {
+      "ok": 20,
+      "total": 20,
+      "segundos": 6.3,
+      "faltaram": [],
+      "exemplo": {
+        "AAPL": 342.37,
+        "MSFT": 530.61,
+        "WMT": 125.52
+      }
+    },
+    "stooq": {
+      "ok": 0,
+      "total": 8,
+      "segundos": 12.4,
+      "erros": {
+        "AAPL": "HTTP 200: '<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name='",
+        "MSFT": "HTTP 200: '<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name='",
+        "WMT": "HTTP 200: '<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name='",
+        "KO": "HTTP 200: '<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name='",
+        "DAL": "HTTP 200: '<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name='",
+        "GOOGL": "HTTP 200: '<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name='",
+        "GOOG": "HTTP 200: '<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name='",
+        "BRK-B": "HTTP 200: '<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name='"
+      }
+    }
+  }
+}

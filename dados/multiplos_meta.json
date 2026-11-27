@@ -1,0 +1,13 @@
+{
+  "gerado_em": "2026-11-27 19:48 UTC",
+  "ultimo_pregao": "2026-11-27",
+  "tickers": 4040,
+  "com_valor_mercado_hoje": 4019,
+  "linhas": {
+    "anual": 37895,
+    "trimestral": 155604
+  },
+  "falhas_download": 0,
+  "exemplo_falhas": [],
+  "fonte_precos": "Yahoo Finance (yfinance)"
+}

@@ -1,0 +1,13 @@
+{
+ "gerado_em": "2026-11-27T19:48:21+00:00",
+ "entregas_ok": true,
+ "entregas_linhas": 73055,
+ "calendario_ok": true,
+ "dias_lidos": 254,
+ "dias_falha": 0,
+ "falhas": [],
+ "linhas": 22814,
+ "primeira_data": "2025-10-23",
+ "ultima_data": "2027-01-21",
+ "ultima_coleta_ok": "2026-11-27T19:48:21+00:00"
+}
