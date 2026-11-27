@@ -9,8 +9,9 @@ Duas saídas na pasta dados/ (branch dados):
       Dias passados trazem EPS realizado e surpresa; dias futuros trazem consenso de EPS, nº de estimativas
       e a data e o EPS do mesmo trimestre do ano anterior. A Nasdaq não informa se a data futura é confirmada
       pela empresa ou estimada.
-      Histórico acumulado: a 1a execução busca ~400 dias para trás; as seguintes rebuscam de hoje-14 a
-      hoje+90 dias e substituem esses dias (datas remarcadas somem do dia antigo).
+      Histórico acumulado: cada execução rebusca de hoje-14 a hoje+90 dias (substitui esses dias; datas
+      remarcadas somem do dia antigo) e, no tempo que sobrar (orçamento de ~11 min), completa o histórico de
+      até ~400 dias para trás.
 
   entregas_eua.parquet     data da 1a entrega do 10-Q/10-K de cada trimestre à SEC (todo o universo, inclusive
       bancos e seguradoras), extraída de eua_trimestral.parquet (coluna dt_arquivamento). Nos EUA o press
@@ -30,6 +31,11 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+try:                       # cliente que imita o Chrome (TLS/HTTP2): o CDN da Nasdaq costuma travar o requests puro
+    from curl_cffi import requests as creq
+except ImportError:        # noqa: BLE001
+    creq = None
+
 DADOS = Path("dados")
 ARQ_CAL = DADOS / "calendario_eua.parquet"
 ARQ_ENT = DADOS / "entregas_eua.parquet"
@@ -43,9 +49,10 @@ CABEC = {
     "Origin": "https://www.nasdaq.com",
     "Referer": "https://www.nasdaq.com/",
 }
-DIAS_ATRAS_INICIAL = 400
+DIAS_ATRAS_INICIAL = 400   # 1a execução: histórico (feito aos poucos, dentro do orçamento de tempo)
 DIAS_ATRAS = 14
 DIAS_FRENTE = 90
+ORCAMENTO_S = 11 * 60      # tempo máximo do passo; o que foi lido até aí é gravado
 HORARIO = {"time-pre-market": "Antes da abertura", "time-after-hours": "Após o fechamento",
            "time-not-supplied": "Não informado"}
 
@@ -73,16 +80,29 @@ def _data_us(s) -> str | None:
         return None
 
 
-def buscar_dia(sess: requests.Session, d: date) -> list[dict] | None:
+def nova_sessao():
+    if creq is not None:
+        sess = creq.Session(impersonate="chrome")
+    else:
+        sess = requests.Session()
+    sess.headers.update(CABEC)
+    return sess
+
+
+def buscar_dia(sess, d: date, log: bool = False) -> list[dict] | None:
     """Linhas de um dia; None se a requisição falhar (lista vazia = dia sem divulgações)."""
-    for tentativa in range(3):
+    for tentativa in range(2):
+        t0 = time.time()
         try:
-            r = sess.get(URL, params={"date": d.isoformat()}, timeout=25)
+            r = sess.get(URL, params={"date": d.isoformat()}, timeout=20)
+            if log:
+                print(f"  {d} HTTP {r.status_code} em {time.time() - t0:.1f}s")
             if r.status_code == 200:
                 j = r.json()
                 return ((j.get("data") or {}).get("rows")) or []
-        except (requests.RequestException, ValueError):
-            pass
+        except Exception as e:  # noqa: BLE001
+            if log:
+                print(f"  {d} erro em {time.time() - t0:.1f}s: {type(e).__name__}: {str(e)[:120]}")
         time.sleep(2 * (tentativa + 1))
     return None
 
@@ -111,17 +131,44 @@ def linhas_dia(d: date, rows: list[dict], agora: str) -> list[dict]:
     return out
 
 
+def _mesclar(antigo: pd.DataFrame, novas: list[dict], ok: list[str], hoje: date) -> pd.DataFrame:
+    novo = pd.DataFrame(novas)
+    if len(antigo):
+        antigo = antigo[~antigo["data"].isin(ok)]             # dias rebuscados são substituídos inteiros
+        cal = pd.concat([antigo, novo], ignore_index=True) if len(novo) else antigo
+    else:
+        cal = novo
+    if not len(cal):
+        return cal
+    cal = cal.sort_values(["data", "ticker"]).drop_duplicates(["data", "ticker"], keep="last")
+    # mesma empresa e mesmo trimestre fiscal em duas datas futuras (remarcação em dia que falhou): fica a coleta
+    # mais recente
+    fut = cal["data"] > hoje.isoformat()
+    f = cal[fut].sort_values("coletado_em").drop_duplicates(["ticker", "trimestre_fiscal"], keep="last")
+    return pd.concat([cal[~fut], f]).sort_values(["data", "ticker"]).reset_index(drop=True)
+
+
 def atualizar_calendario() -> dict:
+    inicio = time.time()
     hoje = datetime.now(timezone.utc).date()
     agora = datetime.now(timezone.utc).isoformat(timespec="seconds")
     antigo = pd.read_parquet(ARQ_CAL) if ARQ_CAL.exists() else pd.DataFrame()
-    atras = DIAS_ATRAS if len(antigo) else DIAS_ATRAS_INICIAL
-    dias = [hoje + timedelta(days=k) for k in range(-atras, DIAS_FRENTE + 1)]
-    sess = requests.Session()
-    sess.headers.update(CABEC)
+    # ordem: janela recente/futura primeiro (o que a aba mais usa); depois o histórico que ainda falta, do mais
+    # recente para o mais antigo
+    janela = [hoje + timedelta(days=k) for k in range(-DIAS_ATRAS, DIAS_FRENTE + 1)]
+    ja_tem = set(antigo["data"]) if len(antigo) else set()
+    hist = [hoje - timedelta(days=k) for k in range(DIAS_ATRAS + 1, DIAS_ATRAS_INICIAL + 1)]
+    hist = [d for d in hist if d.isoformat() not in ja_tem]
+    dias = janela + hist
+    print(f"calendário: {len(janela)} dias na janela + {len(hist)} de histórico pendente; cliente "
+          f"{'curl_cffi (chrome)' if creq is not None else 'requests'}")
+    sess = nova_sessao()
     novas, ok, falhas = [], [], []
     for i, d in enumerate(dias):
-        rows = buscar_dia(sess, d)
+        if time.time() - inicio > ORCAMENTO_S:
+            print(f"orçamento de tempo esgotado após {i} dias; o restante fica para a próxima execução")
+            break
+        rows = buscar_dia(sess, d, log=i < 5 or i % 50 == 0)
         if rows is None:
             falhas.append(d.isoformat())
             if i >= 4 and len(falhas) == i + 1:          # as 5 primeiras falharam: Nasdaq bloqueou, desiste
@@ -130,23 +177,13 @@ def atualizar_calendario() -> dict:
         else:
             ok.append(d.isoformat())
             novas += linhas_dia(d, rows, agora)
-        time.sleep(0.35)
-    print(f"calendário: {len(ok)} dias lidos, {len(falhas)} falhas, {len(novas)} linhas")
+        time.sleep(0.3)
+    print(f"calendário: {len(ok)} dias lidos, {len(falhas)} falhas, {len(novas)} linhas, "
+          f"{time.time() - inicio:.0f}s")
     if not ok:
         return {"calendario_ok": False, "dias_lidos": 0, "dias_falha": len(falhas)}
-    novo = pd.DataFrame(novas)
-    if len(antigo):
-        antigo = antigo[~antigo["data"].isin(ok)]             # dias rebuscados são substituídos inteiros
-        cal = pd.concat([antigo, novo], ignore_index=True) if len(novo) else antigo
-    else:
-        cal = novo
+    cal = _mesclar(antigo, novas, ok, hoje)
     if len(cal):
-        cal = cal.sort_values(["data", "ticker"]).drop_duplicates(["data", "ticker"], keep="last")
-        # mesma empresa e mesmo trimestre fiscal em duas datas futuras (remarcação em dia que falhou): fica a mais
-        # recente coleta
-        fut = cal["data"] > hoje.isoformat()
-        f = cal[fut].sort_values("coletado_em").drop_duplicates(["ticker", "trimestre_fiscal"], keep="last")
-        cal = pd.concat([cal[~fut], f]).sort_values(["data", "ticker"]).reset_index(drop=True)
         DADOS.mkdir(exist_ok=True)
         cal.to_parquet(ARQ_CAL, index=False, compression="zstd")
     return {"calendario_ok": True, "dias_lidos": len(ok), "dias_falha": len(falhas),
