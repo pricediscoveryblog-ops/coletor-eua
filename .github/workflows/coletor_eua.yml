@@ -69,8 +69,10 @@ jobs:
 
       - name: Calendário de resultados (Nasdaq) e entregas de 10-Q/10-K à SEC
         continue-on-error: true          # se a Nasdaq falhar, mantém o calendário anterior
-        timeout-minutes: 20
-        run: python -u calendario_eua.py
+        timeout-minutes: 15
+        run: |
+          pip install -q curl_cffi || true
+          python -u calendario_eua.py
 
       - name: Publicar na branch dados (commit único, sem acumular histórico)
         run: |
